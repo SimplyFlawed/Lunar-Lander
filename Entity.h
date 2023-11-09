@@ -87,10 +87,10 @@ public:
 
     void draw_sprite_from_texture_atlas(ShaderProgram* program, GLuint texture_id, int index);
     bool const check_collision(Entity* other) const;
-    void const check_collision_y(Entity* collidable_entities, int collidable_entity_count);
+    void const check_collision_y(Entity* collidable_entities, int collidable_entity_count, bool& win, bool& loss);
     void const check_collision_x(Entity* collidable_entities, int collidable_entity_count);
 
-    void update(float delta_time, Entity* collidable_entities, int collidable_entity_count);
+    void update(float delta_time, Entity* collidable_entities, int collidable_entity_count, bool &win, bool &loss);
     void render(ShaderProgram* program);
     
     void move_left()  { m_movement.x = -1.0f; };

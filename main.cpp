@@ -33,9 +33,9 @@ struct GameState
 const int WINDOW_WIDTH = 640,
 WINDOW_HEIGHT = 480;
 
-const float BG_RED = 0.1922f,
-BG_BLUE = 0.549f,
-BG_GREEN = 0.9059f,
+const float BG_RED = 0.0470f,
+BG_BLUE = 0.1803f,
+BG_GREEN = 0.0980f,
 BG_OPACITY = 1.0f;
 
 const int VIEWPORT_X = 0,
@@ -49,17 +49,23 @@ F_SHADER_PATH[] = "shaders/fragment_textured.glsl";
 const float MILLISECONDS_IN_SECOND = 1000.0;
 const char  SPRITESHEET_FILEPATH[] = "assets/ship.png",
             DEATH_PLATFORM_FILEPATH[] = "assets/rock.png",
-            WIN_PLATFORM_FILEPATH[] = "assets/stone.png";
+            WIN_PLATFORM_FILEPATH[] = "assets/stone.png",
+            FONT_SPRITE_FILEPATH[] = "assets/font1.png";
+
+GLuint g_text_texture_id;
 
 const int NUMBER_OF_TEXTURES = 1;  // to be generated, that is
 const GLint LEVEL_OF_DETAIL = 0;  // base image level; Level n is the nth mipmap reduction image
 const GLint TEXTURE_BORDER = 0;  // this value MUST be zero
+const int FONTBANK_SIZE = 16;
 
 // ————— VARIABLES ————— //
 GameState g_game_state;
 
 SDL_Window* g_display_window;
-bool g_game_is_running = true;
+bool g_game_is_running = true,
+     g_win = false,
+     g_loss = false;
 
 ShaderProgram g_shader_program;
 glm::mat4 g_view_matrix, g_projection_matrix;
@@ -68,6 +74,68 @@ float g_previous_ticks = 0.0f;
 float g_time_accumulator = 0.0f;
 
 // ———— GENERAL FUNCTIONS ———— //
+void draw_text(ShaderProgram* program, GLuint font_texture_id, std::string text, float screen_size, float spacing, glm::vec3 position)
+{
+    // Scale the size of the fontbank in the UV-plane
+    // We will use this for spacing and positioning
+    float width = 1.0f / FONTBANK_SIZE;
+    float height = 1.0f / FONTBANK_SIZE;
+
+    // Instead of having a single pair of arrays, we'll have a series of pairs—one for each character
+    // Don't forget to include <vector>!
+    std::vector<float> vertices;
+    std::vector<float> texture_coordinates;
+
+    // For every character...
+    for (int i = 0; i < text.size(); i++) {
+        // 1. Get their index in the spritesheet, as well as their offset (i.e. their position
+        //    relative to the whole sentence)
+        int spritesheet_index = (int)text[i];  // ascii value of character
+        float offset = (screen_size + spacing) * i;
+
+        // 2. Using the spritesheet index, we can calculate our U- and V-coordinates
+        float u_coordinate = (float)(spritesheet_index % FONTBANK_SIZE) / FONTBANK_SIZE;
+        float v_coordinate = (float)(spritesheet_index / FONTBANK_SIZE) / FONTBANK_SIZE;
+
+        // 3. Inset the current pair in both vectors
+        vertices.insert(vertices.end(), {
+            offset + (-0.5f * screen_size), 0.5f * screen_size,
+            offset + (-0.5f * screen_size), -0.5f * screen_size,
+            offset + (0.5f * screen_size), 0.5f * screen_size,
+            offset + (0.5f * screen_size), -0.5f * screen_size,
+            offset + (0.5f * screen_size), 0.5f * screen_size,
+            offset + (-0.5f * screen_size), -0.5f * screen_size,
+            });
+
+        texture_coordinates.insert(texture_coordinates.end(), {
+            u_coordinate, v_coordinate,
+            u_coordinate, v_coordinate + height,
+            u_coordinate + width, v_coordinate,
+            u_coordinate + width, v_coordinate + height,
+            u_coordinate + width, v_coordinate,
+            u_coordinate, v_coordinate + height,
+            });
+    }
+
+    // 4. And render all of them using the pairs
+    glm::mat4 model_matrix = glm::mat4(1.0f);
+    model_matrix = glm::translate(model_matrix, position);
+
+    program->set_model_matrix(model_matrix);
+    glUseProgram(program->get_program_id());
+
+    glVertexAttribPointer(program->get_position_attribute(), 2, GL_FLOAT, false, 0, vertices.data());
+    glEnableVertexAttribArray(program->get_position_attribute());
+    glVertexAttribPointer(program->get_tex_coordinate_attribute(), 2, GL_FLOAT, false, 0, texture_coordinates.data());
+    glEnableVertexAttribArray(program->get_tex_coordinate_attribute());
+
+    glBindTexture(GL_TEXTURE_2D, font_texture_id);
+    glDrawArrays(GL_TRIANGLES, 0, (int)(text.size() * 6));
+
+    glDisableVertexAttribArray(program->get_position_attribute());
+    glDisableVertexAttribArray(program->get_tex_coordinate_attribute());
+}
+
 GLuint load_texture(const char* filepath)
 {
     int width, height, number_of_components;
@@ -98,7 +166,7 @@ GLuint load_texture(const char* filepath)
 void initialise()
 {
     SDL_Init(SDL_INIT_VIDEO);
-    g_display_window = SDL_CreateWindow("Hello, Entities!",
+    g_display_window = SDL_CreateWindow("Lunar Lander",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         WINDOW_WIDTH, WINDOW_HEIGHT,
         SDL_WINDOW_OPENGL);
@@ -122,7 +190,7 @@ void initialise()
 
     glUseProgram(g_shader_program.get_program_id());
 
-    glClearColor(BG_RED, BG_BLUE, BG_GREEN, BG_OPACITY);
+    glClearColor(BG_RED, BG_GREEN, BG_BLUE, BG_OPACITY);
 
     // ————— PLAYER ————— //
     g_game_state.player = new Entity();
@@ -166,8 +234,11 @@ void initialise()
         if (platformType == WIN_PLATFORM) g_game_state.platforms[i].m_texture_id = load_texture(WIN_PLATFORM_FILEPATH);
         if (platformType == DEATH_PLATFORM) g_game_state.platforms[i].m_texture_id = load_texture(DEATH_PLATFORM_FILEPATH);
 
-        g_game_state.platforms[i].update(0.0f, NULL, 0);
+        g_game_state.platforms[i].update(0.0f, NULL, 0, g_win, g_loss);
     }
+
+    // ————— TEXT ————— //
+    g_text_texture_id = load_texture(FONT_SPRITE_FILEPATH);
 
     // ————— GENERAL ————— //
     glEnable(GL_BLEND);
@@ -228,13 +299,8 @@ void process_input()
     }
 }
 
-void update()
+void game_loop(float delta_time)
 {
-    // ————— DELTA TIME ————— //
-    float ticks = (float)SDL_GetTicks() / MILLISECONDS_IN_SECOND; // get the current number of ticks
-    float delta_time = ticks - g_previous_ticks; // the delta time is the difference from the last frame
-    g_previous_ticks = ticks;
-
     // ————— FIXED TIMESTEP ————— //
     // STEP 1: Keep track of how much time has passed since last step
     delta_time += g_time_accumulator;
@@ -250,11 +316,24 @@ void update()
     while (delta_time >= FIXED_TIMESTEP)
     {
         // Notice that we're using FIXED_TIMESTEP as our delta time
-        g_game_state.player->update(FIXED_TIMESTEP, g_game_state.platforms, PLATFORM_COUNT);
+        g_game_state.player->update(FIXED_TIMESTEP, g_game_state.platforms, PLATFORM_COUNT, g_win, g_loss);
         delta_time -= FIXED_TIMESTEP;
     }
 
     g_time_accumulator = delta_time;
+}
+
+void update()
+{
+    // ————— DELTA TIME ————— //
+    float ticks = (float)SDL_GetTicks() / MILLISECONDS_IN_SECOND; // get the current number of ticks
+    float delta_time = ticks - g_previous_ticks; // the delta time is the difference from the last frame
+    g_previous_ticks = ticks;
+
+    if (!g_win && !g_loss)
+    {
+        game_loop(delta_time);
+    }
 }
 
 void render()
@@ -267,6 +346,10 @@ void render()
 
     // ————— PLATFORM ————— //
     for (int i = 0; i < PLATFORM_COUNT; i++) g_game_state.platforms[i].render(&g_shader_program);
+
+    // ————— TEXT ————— //
+    if (g_win) draw_text(&g_shader_program, g_text_texture_id, std::string("YOU LANDED SAFELY!"), 0.25f, 0.f, glm::vec3(-1.75f, 2.0f, 0.0f));
+    if (g_loss) draw_text(&g_shader_program, g_text_texture_id, std::string("YOU CRASHED!"), 0.25f, 0.01f, glm::vec3(-1.25f, 2.0f, 0.0f));
 
     // ————— GENERAL ————— //
     SDL_GL_SwapWindow(g_display_window);

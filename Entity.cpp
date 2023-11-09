@@ -73,7 +73,7 @@ void Entity::draw_sprite_from_texture_atlas(ShaderProgram* program, GLuint textu
     glDisableVertexAttribArray(program->get_tex_coordinate_attribute());
 }
 
-void Entity::update(float delta_time, Entity* collidable_entities, int collidable_entity_count)
+void Entity::update(float delta_time, Entity* collidable_entities, int collidable_entity_count, bool &win, bool &loss)
 {
     if (!m_is_active) return;
 
@@ -113,7 +113,7 @@ void Entity::update(float delta_time, Entity* collidable_entities, int collidabl
     m_velocity += m_acceleration * delta_time;
 
     m_position.y += m_velocity.y * delta_time;
-    check_collision_y(collidable_entities, collidable_entity_count);
+    check_collision_y(collidable_entities, collidable_entity_count, win, loss);
 
     m_position.x += m_velocity.x * delta_time;
     check_collision_x(collidable_entities, collidable_entity_count);
@@ -129,7 +129,7 @@ void Entity::update(float delta_time, Entity* collidable_entities, int collidabl
     m_model_matrix = glm::translate(m_model_matrix, m_position);
 }
 
-void const Entity::check_collision_y(Entity* collidable_entities, int collidable_entity_count)
+void const Entity::check_collision_y(Entity* collidable_entities, int collidable_entity_count, bool &win, bool& loss)
 {
     for (int i = 0; i < collidable_entity_count; i++)
     {
@@ -155,6 +155,15 @@ void const Entity::check_collision_y(Entity* collidable_entities, int collidable
                 m_position.y += y_overlap;
                 m_velocity.y = 0;
                 m_collided_bottom = true;
+                
+                if (collidable_entity->get_entity_type() == WIN_PLATFORM)
+                {
+                    win = true;
+                }
+                else if (collidable_entity->get_entity_type() == DEATH_PLATFORM)
+                {
+                    loss = true;
+                }
             }
         }
     }
